@@ -3,6 +3,8 @@ import { VisionAnalysisResult, Vision2CanvasSettings } from '../types';
 import { DEFAULT_VISION_SYSTEM_PROMPT } from './promptTemplates';
 
 export class VisionClient {
+  private static readonly DEFAULT_REMOTE_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/openai';
+  private static readonly DEFAULT_LOCAL_ENDPOINT = 'http://127.0.0.1:1234/v1';
   private settings: Vision2CanvasSettings;
 
   constructor(settings: Vision2CanvasSettings) {
@@ -13,7 +15,18 @@ export class VisionClient {
    * Analyze image via Vision MLLM API endpoint (with automatic retry for 503/429 transient errors)
    */
   public async analyzeImage(base64ImageData: string, mimeType: string = 'image/jpeg'): Promise<VisionAnalysisResult> {
-    const endpoint = this.settings.apiEndpoint.replace(/\/+$/, '') + '/chat/completions';
+    const configuredEndpoint = this.settings.apiEndpoint.trim();
+    const baseEndpoint = this.settings.aiProvider === 'local' &&
+      (!configuredEndpoint || configuredEndpoint === VisionClient.DEFAULT_REMOTE_ENDPOINT)
+      ? VisionClient.DEFAULT_LOCAL_ENDPOINT
+      : configuredEndpoint;
+    const normalizedBaseEndpoint = baseEndpoint.replace(/\/+$/, '');
+    const endpoint = normalizedBaseEndpoint + '/chat/completions';
+
+    if (this.settings.aiProvider === 'local') {
+      await this.loadLocalModel(normalizedBaseEndpoint);
+    }
+
     const systemPrompt = this.settings.customPrompt || DEFAULT_VISION_SYSTEM_PROMPT;
 
     const dataUrl = base64ImageData.startsWith('data:') 
@@ -43,7 +56,6 @@ export class VisionClient {
           ]
         }
       ],
-      response_format: { type: 'json_object' },
       temperature: 0.2
     };
 
@@ -100,6 +112,40 @@ export class VisionClient {
     }
 
     throw lastError || new Error('Failed to analyze image with Vision AI.');
+  }
+
+  /**
+   * Loads the selected model through LM Studio's REST API before inference.
+   */
+  private async loadLocalModel(baseEndpoint: string): Promise<void> {
+    const apiRoot = baseEndpoint.endsWith('/v1')
+      ? baseEndpoint.slice(0, -3)
+      : baseEndpoint;
+    const loadEndpoint = `${apiRoot}/api/v1/models/load`;
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    };
+
+    if (this.settings.apiKey) {
+      headers['Authorization'] = `Bearer ${this.settings.apiKey}`;
+    }
+
+    const response = await requestUrl({
+      url: loadEndpoint,
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: this.settings.modelName,
+        echo_load_config: false
+      }),
+      throwOnError: false
+    });
+
+    if (response.status >= 400) {
+      throw new Error(
+        `LM Studio could not load model "${this.settings.modelName}" (${response.status}): ${response.text}`
+      );
+    }
   }
 
   /**

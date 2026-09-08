@@ -65,6 +65,10 @@ export class ImageUtils {
         }
 
         const canvas = document.createElement('canvas');
+        if (!canvas || typeof canvas.getContext !== 'function') {
+          resolve({ base64: base64Data, mimeType });
+          return;
+        }
         canvas.width = width;
         canvas.height = height;
 

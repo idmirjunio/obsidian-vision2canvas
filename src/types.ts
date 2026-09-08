@@ -82,6 +82,7 @@ export interface VisionAnalysisResult {
 
 // Plugin Settings Interface
 export interface Vision2CanvasSettings {
+  aiProvider: 'local' | 'remote';
   apiEndpoint: string;
   apiKey: string;
   modelName: string;
@@ -95,6 +96,7 @@ export interface Vision2CanvasSettings {
 }
 
 export const DEFAULT_SETTINGS: Vision2CanvasSettings = {
+  aiProvider: 'remote',
   apiEndpoint: 'https://generativelanguage.googleapis.com/v1beta/openai',
   apiKey: '',
   modelName: 'gemini-flash-latest',
