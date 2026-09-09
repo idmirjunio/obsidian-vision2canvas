@@ -1,0 +1,13 @@
+{
+  "aiProvider": "remote",
+  "apiEndpoint": "https://generativelanguage.googleapis.com/v1beta/openai",
+  "apiKey": "AIzaSyAdGMigxPX8xTLmhQikCxq8hmvjgcZpN3g",
+  "modelName": "gemini-3.8-flash",
+  "customPrompt": "",
+  "outputFolder": "",
+  "canvasScaleX": 2.5,
+  "canvasScaleY": 2,
+  "cardWidth": 320,
+  "cardHeight": 180,
+  "autoOpenCanvas": true
+}

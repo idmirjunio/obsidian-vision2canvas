@@ -175,31 +175,7 @@ var VisionClient = class _VisionClient {
     }
     const systemPrompt = this.settings.customPrompt || DEFAULT_VISION_SYSTEM_PROMPT;
     const dataUrl = base64ImageData.startsWith("data:") ? base64ImageData : `data:${mimeType};base64,${base64ImageData}`;
-    const requestBody = {
-      model: this.settings.modelName || "gemini-flash-latest",
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: "Please analyze this handwritten note photo and output the JSON canvas structure."
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: dataUrl
-              }
-            }
-          ]
-        }
-      ],
-      temperature: 0.2
-    };
+    const requestBody = this.buildRequestBody(systemPrompt, dataUrl);
     const headers = {
       "Content-Type": "application/json"
     };
@@ -210,6 +186,7 @@ var VisionClient = class _VisionClient {
     let lastError = null;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
+        console.log("[Gemini] Status:");
         const response = await (0, import_obsidian2.requestUrl)({
           url: endpoint,
           method: "POST",
@@ -217,6 +194,8 @@ var VisionClient = class _VisionClient {
           body: JSON.stringify(requestBody),
           throwOnError: false
         });
+        console.log("[Gemini] Headers:", response.headers);
+        console.log("[Gemini] Text:", response.text);
         if (response.status === 503 || response.status === 429) {
           if (attempt < maxRetries) {
             await new Promise((resolve) => window.setTimeout(resolve, 1500 * attempt));
@@ -228,7 +207,7 @@ var VisionClient = class _VisionClient {
           throw new Error(`AI API request failed (${response.status}): ${response.text}`);
         }
         const responseJson = response.json;
-        const rawContent = responseJson?.choices?.[0]?.message?.content;
+        const rawContent = this.getResponseContent(responseJson);
         if (!rawContent) {
           throw new Error("AI API returned empty response content.");
         }
@@ -244,6 +223,70 @@ var VisionClient = class _VisionClient {
       }
     }
     throw lastError || new Error("Failed to analyze image with Vision AI.");
+  }
+  /**
+   * Builds the request payload according to the selected provider.
+   * Local providers usually follow the OpenAI-like format with a simple chat payload.
+   * Remote providers may accept extra response controls or stricter JSON formatting.
+   */
+  buildRequestBody(systemPrompt, dataUrl) {
+    const model = this.settings.modelName || "gemini-flash-latest";
+    const userPrompt = "Please analyze this handwritten note photo and output the JSON canvas structure.";
+    if (this.settings.aiProvider === "local") {
+      return {
+        model,
+        messages: [
+          {
+            role: "system",
+            content: systemPrompt
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: userPrompt
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: dataUrl
+                }
+              }
+            ]
+          }
+        ],
+        temperature: 0.2,
+        stream: false
+      };
+    }
+    return {
+      model,
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: userPrompt
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: dataUrl
+              }
+            }
+          ]
+        }
+      ]
+      /*temperature: 0.2,*/
+      /*max_tokens: 4096,*/
+      /*response_format: { type: 'json_object'} */
+    };
   }
   /**
    * Loads the selected model through LM Studio's REST API before inference.
@@ -274,16 +317,29 @@ var VisionClient = class _VisionClient {
     }
   }
   /**
-   * Safe JSON parser that strips markdown ticks if present
+   * Extracts text from the OpenAI-compatible response returned by local models.
+   */
+  getResponseContent(response) {
+    const content = response.choices?.[0]?.message?.content;
+    if (typeof content === "string") {
+      return content;
+    }
+    if (Array.isArray(content)) {
+      return content.map((part) => part.text || "").join("").trim();
+    }
+    return "";
+  }
+  /**
+   * Parses JSON even when a local model adds markdown or a short explanation.
    */
   parseJsonResponse(rawText) {
-    let cleanJson = rawText.trim();
-    if (cleanJson.startsWith("```json")) {
-      cleanJson = cleanJson.replace(/^```json\s*/, "").replace(/\s*```$/, "");
-    } else if (cleanJson.startsWith("```")) {
-      cleanJson = cleanJson.replace(/^```\s*/, "").replace(/\s*```$/, "");
+    const cleanJson = rawText.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+    const jsonStart = cleanJson.indexOf("{");
+    const jsonEnd = cleanJson.lastIndexOf("}");
+    if (jsonStart < 0 || jsonEnd <= jsonStart) {
+      throw new Error("AI API response did not contain a JSON object.");
     }
-    const parsed = JSON.parse(cleanJson);
+    const parsed = JSON.parse(cleanJson.slice(jsonStart, jsonEnd + 1));
     if (!parsed.nodes || !Array.isArray(parsed.nodes)) {
       throw new Error('Parsed JSON is missing "nodes" array.');
     }
